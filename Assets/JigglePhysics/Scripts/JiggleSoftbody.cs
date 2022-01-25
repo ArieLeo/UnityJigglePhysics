@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace JigglePhysics {
     public class JiggleSoftbody : MonoBehaviour {
@@ -15,7 +16,10 @@ namespace JigglePhysics {
         public float randomization = 0.1f;
         [System.Serializable]
         public class SoftbodyZone {
+            [System.Serializable]
+            public class UnityEventVector3 : UnityEvent<Vector3> {}
             public Transform origin;
+            public Vector3 offset;
             public float radius;
             public float amplitude;
             public float elastic;
@@ -31,6 +35,7 @@ namespace JigglePhysics {
             public Vector3 velocity;
             [HideInInspector]
             public Vector3 virtualPos;
+            public UnityEventVector3 jiggleEvent;
             public void Friction(float dt) {
                 float speed = velocity.magnitude;
                 if (speed<Mathf.Epsilon) {
@@ -45,10 +50,10 @@ namespace JigglePhysics {
                 velocity *= newSpeed;
             }
             public void Gravity(float dt, float scale) {
-                velocity += gravity * dt * scale;
+                velocity -= gravity * dt * scale;
             }
             public void CalculateAcceleration(float dt) {
-                Vector3 velocityGuess = (origin.position - lastPosition)/dt;
+                Vector3 velocityGuess = (origin.TransformPoint(offset) - lastPosition)/dt;
                 Vector3 newVelocity = (velocityGuess-lastVelocityGuess);
                 // SINWAVE BASED MAXIMUM ACCELLERATION APPROACH
                 //newVelocity = newVelocity.normalized * Mathf.Sin(Mathf.Clamp(newVelocity.magnitude*(Mathf.PI/2f), -1f, 1f)*(0.5f/maximumAcceleration))*maximumAcceleration;
@@ -56,15 +61,15 @@ namespace JigglePhysics {
                 lastVelocityGuess = velocityGuess;
             }
             public void Acceleration(float dt) {
-                velocity -= virtualPos * elastic * dt * 100f;
-                virtualPos += velocity * dt;
-                lastPosition = origin.position;
+                velocity += virtualPos * elastic * dt * 100f;
+                virtualPos -= velocity * dt;
+                lastPosition = origin.TransformPoint(offset);
             }
             public void Pack(ref Vector4[] packTarget, SkinnedMeshRenderer r, int index, float scale) {
                 packTarget[index * 3] = colorMask;
-                packTarget[index * 3 + 1] = r.rootBone.InverseTransformPoint(origin.position)*scale;
+                packTarget[index * 3 + 1] = r.rootBone.InverseTransformPoint(origin.TransformPoint(offset))*scale;
                 packTarget[index * 3 + 1].w = origin.lossyScale.y*radius;
-                packTarget[index * 3 + 2] = -r.rootBone.InverseTransformVector(virtualPos);
+                packTarget[index * 3 + 2] = r.rootBone.InverseTransformVector(virtualPos);
                 packTarget[index * 3 + 2].w = amplitude * scale;
             }
             public void Draw() {
@@ -72,7 +77,7 @@ namespace JigglePhysics {
                     return;
                 }
                 Gizmos.color = new Color(colorMask.r, colorMask.g, colorMask.b, Mathf.Clamp(colorMask.r + colorMask.g + colorMask.b + colorMask.a, 0f, 0.5f));
-                Gizmos.DrawSphere(origin.position, origin.lossyScale.y*radius);
+                Gizmos.DrawSphere(origin.TransformPoint(offset), origin.lossyScale.y*radius);
             }
         }
         private Vector4[] vectorsToSend;
@@ -103,7 +108,7 @@ namespace JigglePhysics {
                 blockCache.Add(r, block);
             }
             foreach( SoftbodyZone zone in zones) {
-                zone.lastPosition = zone.origin.position;
+                zone.lastPosition = zone.origin.TransformPoint(zone.offset);
             }
         }
         public void LateUpdate() {
@@ -172,6 +177,9 @@ namespace JigglePhysics {
                 GetBlock(r).SetVectorArray("_SoftbodyArray", vectorsToSend);
                 r.SetPropertyBlock(GetBlock(r));
             }
+            foreach (SoftbodyZone zone in zones) {
+                zone.jiggleEvent.Invoke(zone.virtualPos);
+            }
         }
         public void OnDrawGizmosSelected() {
             if (zones == null) {
@@ -187,7 +195,7 @@ namespace JigglePhysics {
                 float mask = Mathf.Clamp01(Vector4.Dot(color, zone.colorMask));
                 float dist = Vector3.Distance(targetRenderers[0].rootBone.InverseTransformPoint(wpos), targetRenderers[0].rootBone.InverseTransformPoint(zone.origin.position)) / (zone.radius*zone.origin.lossyScale.x);
                 float effect = Mathf.Clamp01(1f - dist * dist) * mask;
-                offset -= zone.virtualPos * targetRenderers[0].rootBone.lossyScale.x * effect * zone.amplitude;
+                offset += zone.virtualPos * targetRenderers[0].rootBone.lossyScale.x * effect * zone.amplitude;
             }
             return wpos + offset;
         }
